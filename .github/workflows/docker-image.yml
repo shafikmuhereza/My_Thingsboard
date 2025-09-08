@@ -1,54 +1,94 @@
-name: Build and Deploy ThingsBoard
+name: Build ThingsBoard Docker & Artifacts
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
+    # 1️⃣ Checkout the repository
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
+    # 2️⃣ Set up Java 17
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '17'
+
+    # 3️⃣ Set up Node.js 18
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'yarn'
+
+    # 4️⃣ Install Yarn 1.x
+    - name: Install Yarn
+      run: npm install -g yarn@1
+
+    # 5️⃣ Build ThingsBoard UI
+    - name: Build UI
+      working-directory: ./ui-ngx
+      run: yarn install --network-concurrency 1 --network-timeout 100000 && yarn build
+
+    # 6️⃣ Build backend JARs, skipping license checks
+    - name: Build backend JARs
+      run: mvn clean install -DskipTests -Dlicense.skip=true -Denforcer.skip=true
+
+    # 7️⃣ Upload backend JARs
+    - name: Upload JAR artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: thingsboard-jars
+        path: ./application/target/*.jar
+
+    # 8️⃣ Set up Docker Buildx
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+      uses: docker/setup-buildx-action@v3
 
+    # 9️⃣ Cache Docker layers
     - name: Cache Docker layers
-      uses: actions/cache@v2
+      uses: actions/cache@v4
       with:
         path: /tmp/.buildx-cache
         key: ${{ runner.os }}-buildx-${{ github.sha }}
         restore-keys: |
           ${{ runner.os }}-buildx-
 
+    # 🔟 Build Docker images for microservices
     - name: Build tb-core image
-      run: |
-        cd docker/tb-core
-        docker build -t my-thingsboard/tb-core .
-
-    - name: Build tb-transport image
-      run: |
-        cd docker/tb-transport
-        docker build -t my-thingsboard/tb-transport .
+      run: docker build -f docker/tb-core/Dockerfile -t my-thingsboard/tb-core ./docker/tb-core
 
     - name: Build tb-rest image
-      run: |
-        cd docker/tb-rest
-        docker build -t my-thingsboard/tb-rest .
+      run: docker build -f docker/tb-rest/Dockerfile -t my-thingsboard/tb-rest ./docker/tb-rest
+
+    - name: Build tb-transport image
+      run: docker build -f docker/tb-transport/Dockerfile -t my-thingsboard/tb-transport ./docker/tb-transport
 
     - name: Build tb-web image
-      run: |
-        cd docker/tb-web
-        docker build -t my-thingsboard/tb-web .
+      run: docker build -f docker/tb-web/Dockerfile -t my-thingsboard/tb-web ./docker/tb-web
 
-    - name: Push images to Docker Hub
+    # 1️⃣1️⃣ Save Docker images as tar files
+    - name: Save Docker images as artifacts
       run: |
-        docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-        docker push my-thingsboard/tb-core
-        docker push my-thingsboard/tb-transport
-        docker push my-thingsboard/tb-rest
-        docker push my-thingsboard/tb-web
+        docker save my-thingsboard/tb-core -o tb-core.tar
+        docker save my-thingsboard/tb-rest -o tb-rest.tar
+        docker save my-thingsboard/tb-transport -o tb-transport.tar
+        docker save my-thingsboard/tb-web -o tb-web.tar
 
+    # 1️⃣2️⃣ Upload Docker image artifacts
+    - name: Upload Docker image artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: thingsboard-docker
+        path: |
+          tb-core.tar
+          tb-rest.tar
+          tb-transport.tar
+          tb-web.tar
