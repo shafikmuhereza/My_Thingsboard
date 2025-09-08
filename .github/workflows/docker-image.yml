@@ -1,18 +1,54 @@
-name: Docker Image CI
+name: Build and Deploy ThingsBoard
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches:
+      - main
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Cache Docker layers
+      uses: actions/cache@v2
+      with:
+        path: /tmp/.buildx-cache
+        key: ${{ runner.os }}-buildx-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-buildx-
+
+    - name: Build tb-core image
+      run: |
+        cd docker/tb-core
+        docker build -t my-thingsboard/tb-core .
+
+    - name: Build tb-transport image
+      run: |
+        cd docker/tb-transport
+        docker build -t my-thingsboard/tb-transport .
+
+    - name: Build tb-rest image
+      run: |
+        cd docker/tb-rest
+        docker build -t my-thingsboard/tb-rest .
+
+    - name: Build tb-web image
+      run: |
+        cd docker/tb-web
+        docker build -t my-thingsboard/tb-web .
+
+    - name: Push images to Docker Hub
+      run: |
+        docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+        docker push my-thingsboard/tb-core
+        docker push my-thingsboard/tb-transport
+        docker push my-thingsboard/tb-rest
+        docker push my-thingsboard/tb-web
+
